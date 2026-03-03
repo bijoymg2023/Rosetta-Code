@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import bodyParser from "body-parser";
 import dotenv from "dotenv";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { fileURLToPath } from "url";
@@ -15,7 +14,7 @@ const __dirname = dirname(__filename);
 const app = express();
 
 // Middleware to parse JSON requests
-app.use(bodyParser.json());
+app.use(express.json());
 
 // Serve static files (e.g., HTML, CSS, JS)
 app.use(express.static(path.join(__dirname, "ROSETTACODE-main"), { index: false }));
@@ -32,46 +31,60 @@ app.get("/index", (req, res) => {
 // Initialize Google Generative AI client
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
+// Helper: sleep for ms
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Define an API endpoint for code conversion
 app.post("/api", async (req, res) => {
     const { input, fromLang, toLang } = req.body;
 
-    try {
-        console.log("API Key available:", !!process.env.GOOGLE_API_KEY);
-        
-        // Create a prompt for code conversion
-        const prompt = `Convert the following ${fromLang} code to ${toLang}. \n\n${input}`;
-        
-        // Use the gemini-1.5-pro model
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-        
-        console.log(`Converting from ${fromLang} to ${toLang}`);
+    const maxRetries = 3;
+    let attempt = 0;
 
-        // Generate content using the Gemini API
-        const result = await model.generateContent(prompt);
+    while (attempt < maxRetries) {
+        try {
+            attempt++;
+            console.log(`API Key available: ${!!process.env.GOOGLE_API_KEY}`);
 
-        let convertedCode = "";
-        
-        if (result && result.response && result.response.candidates && 
-            result.response.candidates[0] && result.response.candidates[0].content && 
-            result.response.candidates[0].content.parts && 
-            result.response.candidates[0].content.parts[0] && 
-            result.response.candidates[0].content.parts[0].text) {
-            
-            convertedCode = result.response.candidates[0].content.parts[0].text;
-        } else {
-            convertedCode = "// Could not parse the response from the API";
-            console.error("Unexpected response structure:", result);
+            // Create a prompt for code conversion
+            const prompt = `Convert the following ${fromLang} code to ${toLang}. Only return the converted code without any explanation or markdown formatting.\n\n${input}`;
+
+            // Use the gemini-2.0-flash model
+            const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+            console.log(`Converting from ${fromLang} to ${toLang} (attempt ${attempt}/${maxRetries})`);
+
+            // Generate content using the Gemini API
+            const result = await model.generateContent(prompt);
+            const response = result.response;
+            const convertedCode = response.text();
+
+            return res.json({ convertedCode: convertedCode.trim() });
+
+        } catch (error) {
+            console.error(`Error in /api route (attempt ${attempt}):`, error.message);
+
+            // If rate limited and we have retries left, wait and retry
+            if (error.message.includes("429") && attempt < maxRetries) {
+                const waitTime = attempt * 10; // 10s, 20s
+                console.log(`Rate limited. Waiting ${waitTime}s before retry...`);
+                await sleep(waitTime * 1000);
+                continue;
+            }
+
+            // Build a user-friendly error message
+            let userMessage = "Failed to convert code.";
+            if (error.message.includes("429")) {
+                userMessage = "Rate limit exceeded. The free API quota is temporarily exhausted. Please wait a minute and try again.";
+            } else if (error.message.includes("API_KEY_INVALID")) {
+                userMessage = "Invalid API key. Please check your API key in .env.local.";
+            }
+
+            return res.status(500).json({
+                error: userMessage,
+                details: error.message
+            });
         }
-        
-        res.json({ convertedCode: convertedCode.trim() });
-        
-    } catch (error) {
-        console.error("Error in /api route:", error.message);
-        res.status(500).json({ 
-            error: "Failed to convert code.", 
-            details: error.message 
-        });
     }
 });
 

@@ -26,14 +26,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
             const data = await response.json();
 
-            if (data && data.convertedCode) {
+            if (response.ok && data && data.convertedCode) {
                 return data.convertedCode;
             } else {
-                return "// Conversion failed. No response from the server.";
+                return `// Error: ${data.error || "Conversion failed. No response from the server."}`;
             }
         } catch (error) {
             console.error("Error during conversion:", error);
-            return "// Conversion failed due to an error.";
+            return "// Conversion failed. Could not reach the server.";
         }
     }
 
@@ -124,5 +124,5 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     });
 
-    console.log("Using API Key:", process.env.GOOGLE_API_KEY);
+    console.log("Rosetta Code converter loaded.");
 });
